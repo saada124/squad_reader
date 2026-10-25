@@ -40,6 +40,7 @@ class SquadsSession:
         self.players_cache: List[Dict[str, Any]] = []
         self.teams_cache: List[Dict[str, Any]] = []
         self.team_rosters: Dict[int, List[int]] = {}
+        self.user_transfers: Dict[int, int] = {}
 
         # Pre-load player presets from Live Editor database
         self._load_player_presets()
@@ -240,35 +241,17 @@ class SquadsSession:
         risb = self.db.tables_map.get("rIsB")
         czum = self.db.tables_map.get("CZUM")
         
-        # 2. Extract Stadium Names from kISL & ONtg
+        # 2. Extract Stadium Names from kISL
+        # In FIFA/FC 25, record r_idx in kISL maps 1:1 to team record r_idx in lyxL
         stadium_names: Dict[int, str] = {}
-        team_stadiums: Dict[int, str] = {}
         kisl = self.db.tables_map.get("kISL")
-        if kisl and "fwCQ" in kisl.columns_map and "mCXg" in kisl.columns_map:
+        if kisl and "fwCQ" in kisl.columns_map:
             col_sname = kisl.columns_map["fwCQ"]
-            col_tid = kisl.columns_map["mCXg"]
             for r_idx, rec in enumerate(kisl.records):
                 try:
                     sname = col_sname.decode_value(rec)
-                    tid = col_tid.decode_value(rec) & 0xffff
                     if sname:
-                        stadium_names[r_idx] = sname
-                        if tid > 0:
-                            team_stadiums[tid] = sname
-                except Exception:
-                    pass
-        
-        db_transfers: Dict[int, Dict[str, Any]] = {}
-        if risb:
-            for r_idx, rec in enumerate(risb.records):
-                try:
-                    pid = get_bits(rec, 18, 18)
-                    tid = get_bits(rec, 0, 18)
-                    if pid > 0:
-                        db_transfers[pid] = {
-                            "risb_row_idx": r_idx,
-                            "teamid": tid
-                        }
+                        stadium_names[r_idx] = sname.lstrip("_").strip()
                 except Exception:
                     pass
 
@@ -283,15 +266,14 @@ class SquadsSession:
                     pass
 
         # 3. Build Players Cache
-        # Ingest from self.players_lookup (all 25,369 players)
+        # Ingest from self.players_lookup (all 25,369 players with real official clubs)
         for pid, pdata in self.players_lookup.items():
-            db_info = db_transfers.get(pid)
-            if db_info:
-                tid = db_info["teamid"]
-                risb_row = db_info["risb_row_idx"]
+            if pid in self.user_transfers:
+                tid = self.user_transfers[pid]
+                club_name = get_team_name(tid)
             else:
                 tid = pdata.get("teamid", 0)
-                risb_row = None
+                club_name = pdata.get("club") or (get_team_name(tid) if tid > 0 else "Free Agent")
 
             # Add to team roster
             if tid > 0:
@@ -299,6 +281,7 @@ class SquadsSession:
                     self.team_rosters[tid] = []
                 self.team_rosters[tid].append(pid)
 
+            risb_row = None
             czum_row = czum_player_rows.get(pid)
             ovr = pdata["overall"]
             pot = pdata["potential"]
@@ -380,9 +363,8 @@ class SquadsSession:
         for idx, p in enumerate(self.players_cache):
             p["cache_index"] = idx
 
-        # 4. Build Teams Cache from lyxL (all 808 authentic clubs)
+        # 4. Build Teams Cache from lyxL (all 808 authentic clubs with real stadiums)
         lyxl = self.db.tables_map.get("lyxL")
-        default_stad = stadium_names.get(0, "Default Stadium")
         indexed_teams = set()
 
         if lyxl and "IOSv" in lyxl.columns_map:
@@ -393,7 +375,7 @@ class SquadsSession:
                     tname = col_tname.decode_value(rec)
                     if tid > 0 and tname and tid not in indexed_teams:
                         roster = self.team_rosters.get(tid, [])
-                        stadium_name = team_stadiums.get(tid, default_stad)
+                        stadium_name = stadium_names.get(r_idx) or f"{tname} Stadium"
                         self.teams_cache.append({
                             "teamid": tid,
                             "name": tname,
@@ -505,11 +487,16 @@ class SquadsSession:
 
     def transfer_player(self, player_id: int, new_team_id: int) -> bool:
         """Transfers player to a new team in active squad database and updates rosters."""
+        self.user_transfers[player_id] = new_team_id
+        club_name = get_team_name(new_team_id) if new_team_id > 0 else "Free Agent"
+        if player_id in self.players_lookup:
+            self.players_lookup[player_id]["teamid"] = new_team_id
+            self.players_lookup[player_id]["club"] = club_name
+
         for p in self.players_cache:
             if p["playerid"] == player_id:
                 old_team = p["teamid"]
                 p["teamid"] = new_team_id
-                club_name = get_team_name(new_team_id) if new_team_id > 0 else "Free Agent"
                 p["club"] = club_name
                 
                 # Update team_rosters

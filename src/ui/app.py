@@ -527,12 +527,13 @@ class SquadEditorApp:
     def _build_database_tab(self):
         with dpg.group():
             with dpg.group(horizontal=True):
-                dpg.add_text("Select Table:")
-                dpg.add_combo(items=[], tag="db_table_selector", callback=self._on_change_db_table, width=420)
+                dpg.add_text("Table:")
+                dpg.add_combo(items=[], tag="db_table_selector", callback=self._on_change_db_table, width=440)
+                dpg.add_input_text(hint="Quick search table...", tag="db_table_filter_input", callback=self._on_filter_db_tables, width=190)
                 dpg.add_spacer(width=10)
-                dpg.add_button(label="➕ Add Row", callback=self._on_add_row, width=95)
-                dpg.add_button(label="📋 Clone Row", callback=self._on_clone_row, width=105)
-                dpg.add_button(label="🗑️ Delete Row", callback=self._on_delete_row, width=105)
+                dpg.add_button(label="➕ Add Row", callback=self._on_add_row, width=90)
+                dpg.add_button(label="📋 Clone Row", callback=self._on_clone_row, width=95)
+                dpg.add_button(label="🗑️ Delete Row", callback=self._on_delete_row, width=95)
 
             dpg.add_spacer(height=5)
             dpg.add_text("Rows: 0 | Columns: 0 | Record Size: 0 bytes", tag="db_table_stats_text", color=(180, 180, 180))
@@ -1201,15 +1202,36 @@ class SquadEditorApp:
     # --- Database Editor UI Callbacks ---
 
     def _load_database_tables_dropdown(self):
-        items = [f"{sname} ({get_table_display_name(sname)})" for sname, _, _ in self.session.get_table_names_list()]
-        dpg.configure_item("db_table_selector", items=items)
-        if items:
-            dpg.set_value("db_table_selector", items[0])
-            self.selected_table_sname = self.session.db.tables[0].sname
-            self._load_db_table(self.selected_table_sname)
+        items = []
+        for sname, tbl in self.session.db.tables_map.items():
+            disp = get_table_display_name(sname)
+            items.append(f"{sname} — {disp} ({len(tbl.records):,} rows)")
+        self.all_table_items = items
+        if dpg.does_item_exist("db_table_selector"):
+            dpg.configure_item("db_table_selector", items=items)
+            if items:
+                dpg.set_value("db_table_selector", items[0])
+                self.selected_table_sname = self.session.db.tables[0].sname
+                self._load_db_table(self.selected_table_sname)
+
+    def _on_filter_db_tables(self, sender, app_data):
+        filter_txt = (dpg.get_value("db_table_filter_input") or "").lower().strip()
+        if not hasattr(self, "all_table_items"):
+            return
+        if not filter_txt:
+            filtered = self.all_table_items
+        else:
+            filtered = [it for it in self.all_table_items if filter_txt in it.lower()]
+        dpg.configure_item("db_table_selector", items=filtered)
+        if filtered:
+            dpg.set_value("db_table_selector", filtered[0])
+            sname = filtered[0].split(" ")[0].split("—")[0].strip()
+            self.selected_table_sname = sname
+            self.current_table_page = 0
+            self._load_db_table(sname)
 
     def _on_change_db_table(self, sender, app_data):
-        sname = app_data.split(" ")[0].strip()
+        sname = app_data.split(" ")[0].split("—")[0].strip()
         self.selected_table_sname = sname
         self.current_table_page = 0
         self._load_db_table(sname)
@@ -1262,13 +1284,18 @@ class SquadEditorApp:
         end_idx = min(start_idx + self.page_size, total_rows)
 
         items = []
+        filter_txt = (dpg.get_value("db_record_search_input") or "").lower().strip() if dpg.does_item_exist("db_record_search_input") else ""
         for r_idx in range(start_idx, end_idx):
             rec = tbl.records[r_idx]
             summary_cols = []
-            for col in tbl.columns[:3]:
+            for col in tbl.columns[:4]:
                 val = col.decode_value(rec)
-                summary_cols.append(f"{col.sname}={val}")
-            items.append(f"Row {r_idx:5d}: " + " | ".join(summary_cols))
+                col_name = get_column_display_name(col.sname)
+                summary_cols.append(f"{col_name}: {val}")
+            row_str = f"Row {r_idx:5d}: " + " | ".join(summary_cols)
+            if filter_txt and filter_txt not in row_str.lower():
+                continue
+            items.append(row_str)
 
         dpg.configure_item("db_records_listbox", items=items)
         dpg.configure_item("record_actions_group", show=False)
@@ -1310,10 +1337,10 @@ class SquadEditorApp:
                 val = col.decode_value(rec)
                 disp_name = get_column_display_name(col.sname)
                 with dpg.group(horizontal=True):
-                    dpg.add_text(f"{disp_name:24s} [{col.sname:4s}] (bits:{col.bit_size:2d}):", color=(200, 200, 200))
+                    dpg.add_text(f"{disp_name} [{col.sname}] ({col.bit_size}b):", color=(180, 220, 255), width=260)
                     tag = f"field_edit_{col.sname}"
                     if col.col_type == 0: # String
-                        dpg.add_input_text(default_value=str(val), tag=tag, width=280)
+                        dpg.add_input_text(default_value=str(val), tag=tag, width=300)
                     elif col.col_type == 4: # Float
                         dpg.add_input_float(default_value=float(val), tag=tag, width=200)
                     else: # Int / Bitfield
