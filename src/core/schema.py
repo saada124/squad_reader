@@ -82,9 +82,203 @@ TABLE_NAMES = {
     "esAj": "Global Engine Database Constants",
 }
 
+TABLE_CATEGORIES = {
+    # 👥 Players & Attributes
+    "CZUM": "👥 Players & Attributes",
+    "RrqT": "👥 Players & Attributes",
+    "ONtg": "👥 Players & Attributes",
+    "SPTx": "👥 Players & Attributes",
+    "AGmV": "👥 Players & Attributes",
+    "dMwM": "👥 Players & Attributes",
+    "GPlh": "👥 Players & Attributes",
+    "uxUO": "👥 Players & Attributes",
+    "nrFl": "👥 Players & Attributes",
+    "nhXl": "👥 Players & Attributes",
+    "kgGh": "👥 Players & Attributes",
+    "HeDf": "👥 Players & Attributes",
+    "Hrbq": "👥 Players & Attributes",
+    "FMpz": "👥 Players & Attributes",
+    "qsGz": "👥 Players & Attributes",
+    "qmil": "👥 Players & Attributes",
+    "nQVU": "👥 Players & Attributes",
+
+    # 🛡️ Teams & Rosters
+    "mDGw": "🛡️ Teams & Rosters",
+    "lyxL": "🛡️ Teams & Rosters",
+    "qdZF": "🛡️ Teams & Rosters",
+    "onMQ": "🛡️ Teams & Rosters",
+    "ubBA": "🛡️ Teams & Rosters",
+    "YNEf": "🛡️ Teams & Rosters",
+    "QqjW": "🛡️ Teams & Rosters",
+    "mMQM": "🛡️ Teams & Rosters",
+    "tfLS": "🛡️ Teams & Rosters",
+    "AqBt": "🛡️ Teams & Rosters",
+    "DFeB": "🛡️ Teams & Rosters",
+
+    # 🏟️ Stadiums & Venues
+    "kISL": "🏟️ Stadiums & Venues",
+    "sloG": "🏟️ Stadiums & Venues",
+    "VHaB": "🏟️ Stadiums & Venues",
+    "Qxjv": "🏟️ Stadiums & Venues",
+    "SizI": "🏟️ Stadiums & Venues",
+    "OIcD": "🏟️ Stadiums & Venues",
+    "YBgI": "🏟️ Stadiums & Venues",
+    "WFUF": "🏟️ Stadiums & Venues",
+    "fGwQ": "🏟️ Stadiums & Venues",
+
+    # 🏆 Competitions & Leagues
+    "ijbM": "🏆 Competitions & Leagues",
+    "bqIi": "🏆 Competitions & Leagues",
+    "GdtI": "🏆 Competitions & Leagues",
+    "yAGl": "🏆 Competitions & Leagues",
+    "ImNE": "🏆 Competitions & Leagues",
+    "CxJp": "🏆 Competitions & Leagues",
+    "bneD": "🏆 Competitions & Leagues",
+    "xuka": "🏆 Competitions & Leagues",
+    "QMqB": "🏆 Competitions & Leagues",
+    "UlaA": "🏆 Competitions & Leagues",
+
+    # 🌍 Nations & Geography
+    "hCEv": "🌍 Nations & Geography",
+    "vGSz": "🌍 Nations & Geography",
+
+    # 👔 Managers & Staff
+    "Vmkr": "👔 Managers & Staff",
+    "zFhW": "👔 Managers & Staff",
+    "ZrAO": "👔 Managers & Staff",
+    "TKgq": "👔 Managers & Staff",
+    "GiKo": "👔 Managers & Staff",
+
+    # ⚽ Matchday & Equipment
+    "nhky": "⚽ Matchday & Equipment",
+    "RMfq": "⚽ Matchday & Equipment",
+    "IePu": "⚽ Matchday & Equipment",
+    "LbKk": "⚽ Matchday & Equipment",
+    "VZEn": "⚽ Matchday & Equipment",
+    "ySyc": "⚽ Matchday & Equipment",
+    "DbIl": "⚽ Matchday & Equipment",
+    "MsTi": "⚽ Matchday & Equipment",
+    "xgkO": "⚽ Matchday & Equipment",
+    "fMpR": "⚽ Matchday & Equipment",
+
+    # ⚙️ Engine, Rules & System
+    "YOKt": "⚙️ Engine, Rules & System",
+    "yYtg": "⚙️ Engine, Rules & System",
+    "zIOu": "⚙️ Engine, Rules & System",
+    "brHl": "⚙️ Engine, Rules & System",
+    "Zeam": "⚙️ Engine, Rules & System",
+    "Knen": "⚙️ Engine, Rules & System",
+    "SWFH": "⚙️ Engine, Rules & System",
+    "PViY": "⚙️ Engine, Rules & System",
+    "nVuT": "⚙️ Engine, Rules & System",
+    "eqXx": "⚙️ Engine, Rules & System",
+    "rIsB": "⚙️ Engine, Rules & System",
+    "esAj": "⚙️ Engine, Rules & System",
+}
+
+CATEGORY_LIST = [
+    "📁 All Categories (76 tables)",
+    "👥 Players & Attributes (17 tables)",
+    "🛡️ Teams & Rosters (11 tables)",
+    "🏟️ Stadiums & Venues (9 tables)",
+    "🏆 Competitions & Leagues (10 tables)",
+    "🌍 Nations & Geography (2 tables)",
+    "👔 Managers & Staff (5 tables)",
+    "⚽ Matchday & Equipment (10 tables)",
+    "⚙️ Engine, Rules & System (12 tables)"
+]
+
+TABLE_SAFETY_CONFIG = {
+    # 🟢 SAFE TABLES
+    "CZUM": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Player attributes & skills. Safe to edit ratings directly."},
+    "RrqT": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Custom names & commentary links. Safe to customize."},
+    "kISL": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Stadium and home venue names. Safe to edit text."},
+    "QqjW": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Team kits, colors, and jersey styles. Safe to customize."},
+    "SPTx": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "PlayStyles and gameplay perks. Safe to edit."},
+    "RMfq": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Boots catalog and player footwear assignments. Safe to edit."},
+    "fMpR": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Commentator audio call names. Safe to edit."},
+    "nhky": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Match ball models and textures. Safe to edit."},
+    "fGwQ": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Crowd chants and stadium audio atmosphere. Safe to edit."},
+    "YBgI": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Pitchside sponsor boards. Safe to customize."},
+    "WFUF": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Club ultras banners and stadium flags. Safe to edit."},
+    "dMwM": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Player cards and tier borders. Safe to customize."},
+    "qsGz": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Youth academy prospects and potential. Safe to edit."},
+    "ONtg": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Player body biometrics (height, weight, body type). Safe to edit."},
+    "nhXl": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Squad shirt jersey numbers. Safe to customize."},
+    "HeDf": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Player physical injuries and recovery days. Safe to edit."},
+    "uxUO": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Match sharpness and player form. Safe to edit."},
+    "FMpz": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Squad happiness and morale. Safe to edit."},
+    "IePu": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Goalkeeper glove models. Safe to edit."},
+    "LbKk": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Training pitch balls. Safe to edit."},
+    "VZEn": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Match weather conditions and climate. Safe to edit."},
+    "xgkO": {"level": "SAFE", "badge": "🟢 SAFE", "desc": "Referee and match official profiles. Safe to edit."},
+
+    # 🔴 HIGH RISK TABLES
+    "rIsB": {"level": "DANGEROUS", "badge": "🔴 HIGH RISK", "desc": "Squad delta and raw memory pointers. Modifying can corrupt superstar clubs or crash saves!"},
+    "esAj": {"level": "DANGEROUS", "badge": "🔴 HIGH RISK", "desc": "Global EA FC engine constants. Modifying can cause immediate game crashes on launch!"},
+    "sloG": {"level": "DANGEROUS", "badge": "🔴 HIGH RISK", "desc": "Stadium 3D geometry coordinates. Modifying raw vertex offsets may distort 3D models."},
+    "AqBt": {"level": "DANGEROUS", "badge": "🔴 HIGH RISK", "desc": "Engine chemistry links and memory hashes. Modifying can cause engine crashes."},
+    "SizI": {"level": "DANGEROUS", "badge": "🔴 HIGH RISK", "desc": "Goalpost 3D net mesh vertex arrays. Modifying can cause graphics glitches."},
+    "Knen": {"level": "DANGEROUS", "badge": "🔴 HIGH RISK", "desc": "Advanced engine telemetry metrics. High-risk internal references."},
+}
+
 def get_table_display_name(sname: str) -> str:
     """Returns human-readable table name or shortname."""
     return TABLE_NAMES.get(sname, f"Table_{sname}")
+
+def get_table_category(sname: str) -> str:
+    """Returns human-readable category for a table."""
+    return TABLE_CATEGORIES.get(sname, "⚙️ Engine, Rules & System")
+
+def get_table_safety_info(sname: str) -> dict:
+    """Returns safety level, badge, and description for a table."""
+    if sname in TABLE_SAFETY_CONFIG:
+        return TABLE_SAFETY_CONFIG[sname]
+    return {
+        "level": "CAUTION",
+        "badge": "🟡 CAUTION",
+        "desc": f"Relational table '{get_table_display_name(sname)}'. Modifying row values requires valid foreign key references."
+    }
+
+def is_column_id_or_key(table_sname: str, col_sname: str) -> bool:
+    """Detects if a column is a primary key, foreign key, or critical pointer."""
+    # Special known ID columns in EA FC
+    if col_sname in ("eyGK", "GFLI", "wDHM", "mCXg", "ykFq", "OblE", "JMld", "vjla", "jIcz", "WLKn", "STID", "eqId", "idFG", "IDgE", "zoID", "nKiD", "MUiD", "eIDC", "TIDs"):
+        return True
+    name = COLUMN_NAMES.get(col_sname, col_sname).lower()
+    return any(k in name for k in ["id", "code", "team", "player", "nation", "league", "stadium", "manager", "captain"])
+
+def get_column_safety_warning(table_sname: str, col_sname: str, col_type: int, bit_size: int) -> str:
+    """Returns a safety warning message for a specific column if applicable."""
+    if is_column_id_or_key(table_sname, col_sname):
+        return "⚠️ Primary Key / ID: Modifying this ID breaks relationships across other tables and may corrupt save files!"
+    if bit_size > 32:
+        return "⚠️ Large Bitmask / Binary Blob: Modifying raw bits directly may cause engine instability."
+    if col_type == 3 and bit_size == 1:
+        return "ℹ️ Flag / Boolean Field: 0 = Disabled, 1 = Enabled."
+    return ""
+
+def validate_column_value(col_type: int, bit_size: int, val: any) -> tuple:
+    """Validates user input value against column type and bit width. Returns (is_valid, error_msg)."""
+    if col_type == 0:  # String
+        return True, ""
+    if col_type == 4:  # Float
+        try:
+            float(val)
+            return True, ""
+        except Exception:
+            return False, f"Must be a valid floating-point number (got '{val}')"
+    # Integer / Bitfield
+    try:
+        ival = int(val)
+    except Exception:
+        return False, f"Must be a valid integer number (got '{val}')"
+    if ival < 0:
+        return False, f"Negative numbers ({ival}) not supported in unsigned bitfields"
+    max_val = (1 << bit_size) - 1
+    if ival > max_val:
+        return False, f"Value {ival:,} exceeds maximum allowed {max_val:,} for {bit_size}-bit field! Value would corrupt adjacent columns."
+    return True, ""
 
 POSITION_NAMES = {
     -1: "None",
@@ -261,7 +455,9 @@ COLUMN_NAMES = {
     "JMld": "firstnameid",
     "vjla": "lastnameid",
     "jIcz": "playername",
-    "fwCQ": "jerseynumber",
+    "fwCQ": "stadiumname",
+    "JFiY": "jerseynumber",
+    "dGNm": "position",
     "DmlS": "stadium_data",
     "LGsF": "teamname",
     "ykFq": "playerid",

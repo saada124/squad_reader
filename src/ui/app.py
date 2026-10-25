@@ -8,12 +8,22 @@ import dearpygui.dearpygui as dpg
 
 try:
     from model.squads_db import SquadsSession
-    from core.schema import get_table_display_name, get_column_display_name, get_position_name, get_team_name, POSITION_NAMES, TEAM_NAMES
+    from core.schema import (
+        get_table_display_name, get_column_display_name, get_position_name, get_team_name,
+        POSITION_NAMES, TEAM_NAMES, CATEGORY_LIST, TABLE_CATEGORIES, TABLE_SAFETY_CONFIG,
+        get_table_category, get_table_safety_info, is_column_id_or_key, get_column_safety_warning,
+        validate_column_value
+    )
     from core.backup import list_folder_backups
     from core.playstyles import PLAYSTYLE_CATEGORIES, PLAYSTYLE_MAP, decode_player_playstyles, encode_player_playstyles, get_active_playstyles_summary
 except ImportError:
     from src.model.squads_db import SquadsSession
-    from src.core.schema import get_table_display_name, get_column_display_name, get_position_name, get_team_name, POSITION_NAMES, TEAM_NAMES
+    from src.core.schema import (
+        get_table_display_name, get_column_display_name, get_position_name, get_team_name,
+        POSITION_NAMES, TEAM_NAMES, CATEGORY_LIST, TABLE_CATEGORIES, TABLE_SAFETY_CONFIG,
+        get_table_category, get_table_safety_info, is_column_id_or_key, get_column_safety_warning,
+        validate_column_value
+    )
     from src.core.backup import list_folder_backups
     from src.core.playstyles import PLAYSTYLE_CATEGORIES, PLAYSTYLE_MAP, decode_player_playstyles, encode_player_playstyles, get_active_playstyles_summary
 
@@ -23,9 +33,14 @@ class SquadEditorApp:
         self.selected_player: Optional[Dict[str, Any]] = None
         self.selected_team: Optional[Dict[str, Any]] = None
         self.selected_table_sname: str = "CZUM"
+        self.selected_category: str = "📁 All Categories (76 tables)"
+        self.pending_structural_action: Optional[str] = None
         self.current_table_page: int = 0
         self.page_size: int = 50
         self.selected_record_index: Optional[int] = None
+        self.selected_team_roster_pid: Optional[int] = None
+        self.filtered_sign_players: List[Dict[str, Any]] = []
+        self.selected_sign_player: Optional[Dict[str, Any]] = None
         
         # Filtered lists & Presets
         self.filtered_players: List[Dict[str, Any]] = []
@@ -118,6 +133,46 @@ class SquadEditorApp:
                 # TAB 4: SAFETY BACKUPS & INFO
                 with dpg.tab(label=" ⚙️ Settings & Backups "):
                     self._build_settings_tab()
+
+            # Structural Modification Confirmation Modal
+            with dpg.window(label="⚠️ Structural Table Action Warning", modal=True, show=False, tag="structural_confirm_modal", width=540, height=240, no_resize=True):
+                dpg.add_text("WARNING: Modifying Table Row Count", color=(255, 80, 80))
+                dpg.add_spacer(height=6)
+                dpg.add_text("", tag="structural_modal_msg", wrap=510)
+                dpg.add_spacer(height=15)
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="⚠️ Confirm & Proceed", callback=self._on_confirm_structural_action, width=170)
+                    dpg.add_spacer(width=20)
+                    dpg.add_button(label="Cancel", callback=lambda: dpg.configure_item("structural_confirm_modal", show=False), width=100)
+
+            # Global Search & Sign Player Modal
+            with dpg.window(label="➕ Sign Player to Club", modal=True, show=False, tag="sign_player_modal", width=700, height=540, no_resize=True):
+                dpg.add_text("Transfer & Sign Player to Club", color=(0, 200, 255))
+                dpg.add_text("Target Destination: None", tag="sign_player_target_club_label", color=(255, 200, 0))
+                dpg.add_separator()
+
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Search:")
+                    dpg.add_input_text(hint="Search player name, ID or current club...", callback=self._on_filter_sign_players, tag="sign_player_search_input", width=260)
+                    dpg.add_text("Pos:")
+                    dpg.add_combo(items=["All", "Attackers", "Midfielders", "Defenders", "Goalkeepers"], default_value="All", callback=self._on_filter_sign_players, tag="sign_player_pos_combo", width=120)
+                    dpg.add_text("Min OVR:")
+                    dpg.add_slider_int(min_value=0, max_value=95, default_value=0, callback=self._on_filter_sign_players, tag="sign_player_min_ovr_slider", width=90)
+
+                dpg.add_spacer(height=4)
+                dpg.add_text("Matching Players: 0", tag="sign_player_count_label", color=(150, 150, 150))
+                dpg.add_listbox(items=[], num_items=12, tag="sign_player_listbox", callback=self._on_select_sign_player, width=670)
+
+                dpg.add_spacer(height=6)
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Selected:", color=(0, 255, 120))
+                    dpg.add_text("None selected", tag="sign_player_selected_info", color=(240, 240, 240))
+
+                dpg.add_spacer(height=12)
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="✅ Complete Transfer & Sign to Club", callback=self._on_confirm_sign_player, width=280)
+                    dpg.add_spacer(width=20)
+                    dpg.add_button(label="Cancel", callback=lambda: dpg.configure_item("sign_player_modal", show=False), width=100)
 
         dpg.set_primary_window("primary_window", True)
 
@@ -513,51 +568,80 @@ class SquadEditorApp:
 
                     with dpg.group(horizontal=True):
                         dpg.add_text("🏟️ Stadium:    ")
-                        dpg.add_input_text(tag="edit_team_stadium", width=420, readonly=True)
+                        dpg.add_input_text(tag="edit_team_stadium", width=360)
+                        dpg.add_button(label="💾 Save Club Details", callback=self._on_save_team_changes, width=160)
 
                     dpg.add_spacer(height=10)
-                    dpg.add_text("Squad Roster", color=(0, 200, 255))
-                    dpg.add_listbox(items=[], num_items=16, tag="team_roster_listbox", width=580)
+                    dpg.add_separator()
 
-                    dpg.add_spacer(height=15)
+                    # Squad Roster Header & Sign Player Action
                     with dpg.group(horizontal=True):
-                        dpg.add_button(label="💾 Apply Team Changes", callback=self._on_save_team_changes, width=180)
-                        dpg.add_text("", tag="team_save_feedback", color=(0, 255, 120))
+                        dpg.add_text("Club Squad Roster", color=(0, 200, 255))
+                        dpg.add_spacer(width=160)
+                        dpg.add_button(label="➕ Sign Player to Club", callback=self._on_open_sign_player_modal, width=190)
+
+                    dpg.add_text("Click a player below to edit shirt number or release to free agents:", color=(160, 160, 160))
+                    dpg.add_listbox(items=[], num_items=14, tag="team_roster_listbox", callback=self._on_select_team_roster_player, width=620)
+
+                    # Selected Player Roster Management Card
+                    with dpg.group(tag="team_roster_player_actions", show=False):
+                        dpg.add_spacer(height=6)
+                        dpg.add_text("Managing: None", tag="team_roster_player_title", color=(0, 255, 180))
+                        with dpg.group(horizontal=True):
+                            dpg.add_text("Jersey #: ")
+                            dpg.add_input_int(tag="edit_team_roster_jersey_num", min_value=1, max_value=99, default_value=10, width=80)
+                            dpg.add_button(label="Set #", callback=self._on_set_roster_jersey_num, width=70)
+                            dpg.add_spacer(width=30)
+                            dpg.add_button(label="❌ Release to Free Agents", callback=self._on_release_roster_player, width=210)
+
+                    dpg.add_spacer(height=10)
+                    dpg.add_text("", tag="team_save_feedback", color=(0, 255, 120))
 
     def _build_database_tab(self):
         with dpg.group():
+            # Category and Table selector toolbar
             with dpg.group(horizontal=True):
+                dpg.add_text("Category:")
+                dpg.add_combo(items=CATEGORY_LIST, default_value=CATEGORY_LIST[0], tag="db_category_selector", callback=self._on_change_db_category, width=225)
+                dpg.add_spacer(width=5)
                 dpg.add_text("Table:")
-                dpg.add_combo(items=[], tag="db_table_selector", callback=self._on_change_db_table, width=440)
-                dpg.add_input_text(hint="Quick search table...", tag="db_table_filter_input", callback=self._on_filter_db_tables, width=190)
-                dpg.add_spacer(width=10)
-                dpg.add_button(label="➕ Add Row", callback=self._on_add_row, width=90)
-                dpg.add_button(label="📋 Clone Row", callback=self._on_clone_row, width=95)
-                dpg.add_button(label="🗑️ Delete Row", callback=self._on_delete_row, width=95)
+                dpg.add_combo(items=[], tag="db_table_selector", callback=self._on_change_db_table, width=380)
+                dpg.add_input_text(hint="Quick search...", tag="db_table_filter_input", callback=self._on_filter_db_tables, width=140)
+                dpg.add_spacer(width=8)
+                dpg.add_button(label="➕ Add Row", callback=self._on_click_add_row, width=85)
+                dpg.add_button(label="📋 Clone", callback=self._on_clone_row, width=75)
+                dpg.add_button(label="🗑️ Delete", callback=self._on_click_delete_row, width=80)
 
-            dpg.add_spacer(height=5)
-            dpg.add_text("Rows: 0 | Columns: 0 | Record Size: 0 bytes", tag="db_table_stats_text", color=(180, 180, 180))
+            dpg.add_spacer(height=4)
+            # Table Safety & Stats Card
+            with dpg.group(horizontal=True):
+                dpg.add_text("🟢 SAFE", tag="db_table_safety_badge", color=(0, 255, 120))
+                dpg.add_text("|", color=(100, 100, 100))
+                dpg.add_text("Safe to edit player attributes directly.", tag="db_table_safety_desc", color=(200, 230, 255))
+            dpg.add_text("Rows: 0 | Columns: 0 | Record Size: 0 bytes", tag="db_table_stats_text", color=(150, 150, 150))
             dpg.add_separator()
 
             with dpg.group(horizontal=True):
                 # Left Pane: Records Grid & Pagination
-                with dpg.child_window(width=520):
+                with dpg.child_window(width=540):
                     with dpg.group(horizontal=True):
                         dpg.add_button(label="◀ Prev", callback=self._on_prev_page)
                         dpg.add_text("Page 1 of 1", tag="db_pagination_text")
                         dpg.add_button(label="Next ▶", callback=self._on_next_page)
-                        dpg.add_spacer(width=20)
-                        dpg.add_input_text(hint="Filter rows...", callback=self._on_filter_records, tag="db_record_search_input", width=180)
+                        dpg.add_spacer(width=15)
+                        dpg.add_input_text(hint="Filter rows (name, club, ID)...", callback=self._on_filter_records, tag="db_record_search_input", width=220)
 
-                    dpg.add_listbox(items=[], num_items=26, tag="db_records_listbox", callback=self._on_select_record, width=500)
+                    dpg.add_listbox(items=[], num_items=26, tag="db_records_listbox", callback=self._on_select_record, width=520)
 
                 # Right Pane: Detailed Record Column Field Inspector
                 with dpg.child_window():
                     dpg.add_text("Record Column Inspector (All Fields)", color=(0, 180, 240))
-                    dpg.add_text("Select a row from the left to view and edit column values.", tag="record_inspector_header", color=(200, 200, 200))
+                    dpg.add_text("", tag="record_inspector_entity_banner", color=(0, 255, 200))
+                    dpg.add_text("Select a row from the left to view and edit column values.", tag="record_inspector_header", color=(220, 220, 220))
+                    dpg.add_text("", tag="record_inspector_safety_warning", color=(255, 180, 0))
                     dpg.add_separator()
                     
-                    with dpg.child_window(height=520, tag="record_fields_container"):
+                    with dpg.child_window(height=500, tag="record_fields_container"):
                         pass
                         
                     dpg.add_spacer(height=10)
@@ -824,6 +908,7 @@ class SquadEditorApp:
 
         p = self.filtered_players[idx]
         self.selected_player = p
+        pid = p["playerid"]
 
         # Set color-coded badge
         ovr = p["overall"]
@@ -831,15 +916,16 @@ class SquadEditorApp:
         dpg.set_value("player_badge_ovr", f"[ {ovr:2d} ]")
         dpg.configure_item("player_badge_ovr", color=badge_color)
 
-        dpg.set_value("player_header_name", f"{p['name']} (ID: {p['playerid']})")
-        dpg.set_value("player_sub_header", f"Club: {p['club']}  |  Position: {p['position']}  |  Foot: {p.get('foot', 'Right')}  |  Skills: {p.get('skills', 3)}★  |  Weak Foot: {p.get('weak_foot', 3)}★")
+        jersey_num = self.session.get_player_jersey_number(pid)
+        dpg.set_value("player_header_name", f"#{jersey_num} {p['name']} (ID: {pid})")
+        dpg.set_value("player_sub_header", f"Club: {p['club']}  |  Kit: #{jersey_num}  |  Position: {p['position']}  |  Foot: {p.get('foot', 'Right')}  |  Skills: {p.get('skills', 3)}★  |  Weak Foot: {p.get('weak_foot', 3)}★")
 
         stats = p.get("stats", {})
         
         # Populate sliders and fields
         dpg.set_value("edit_player_ovr", ovr)
         dpg.set_value("edit_player_pot", p.get("potential", ovr))
-        dpg.set_value("edit_player_id_display", p["playerid"])
+        dpg.set_value("edit_player_id_display", pid)
         dpg.set_value("edit_player_age_display", p.get("age", 25))
         
         # Club dropdown with all authentic 808 teams
@@ -863,10 +949,6 @@ class SquadEditorApp:
         dpg.set_value("edit_player_pos3", _get_pos_name_safe(stats.get("preferredposition3", -1)))
         dpg.set_value("edit_player_pos4", _get_pos_name_safe(stats.get("preferredposition4", -1)))
 
-        try:
-            jersey_num = int(stats.get("jerseynumber", stats.get("playerjerseynameid", 10)))
-        except Exception:
-            jersey_num = 10
         dpg.set_value("edit_player_jersey", jersey_num)
         
         try:
@@ -1069,12 +1151,15 @@ class SquadEditorApp:
         jersey_num = dpg.get_value("edit_player_jersey")
         contract_yr = dpg.get_value("edit_player_contract")
         is_ret = 1 if dpg.get_value("edit_player_isretiring") else 0
-        self.session.update_player_attribute(pid, "jerseynumber", jersey_num)
+        self.session.set_player_jersey_number(pid, jersey_num)
         self.session.update_player_attribute(pid, "contractvaliduntil", contract_yr)
         self.session.update_player_attribute(pid, "isretiring", is_ret)
         stats["jerseynumber"] = str(jersey_num)
         stats["contractvaliduntil"] = str(contract_yr)
         stats["isretiring"] = str(is_ret)
+
+        dpg.set_value("player_header_name", f"#{jersey_num} {self.selected_player['name']} (ID: {pid})")
+        dpg.set_value("player_sub_header", f"Club: {self.selected_player['club']}  |  Kit: #{jersey_num}  |  Position: {self.selected_player['position']}  |  Foot: {self.selected_player.get('foot', 'Right')}  |  Skills: {self.selected_player.get('skills', 3)}★  |  Weak Foot: {self.selected_player.get('weak_foot', 3)}★")
 
         # 6. Kit & Appearance
         j_style = 1 if dpg.get_value("edit_player_jerseystyle") == "Untucked" else 0
@@ -1162,6 +1247,22 @@ class SquadEditorApp:
         if dpg.does_item_exist("team_count_label"):
             dpg.set_value("team_count_label", f"Total Clubs: {len(self.filtered_teams):,} matches")
 
+    def _refresh_team_roster_display(self):
+        if not self.selected_team:
+            return
+        t = self.selected_team
+        roster_items = []
+        for pid in t.get("roster", []):
+            jersey = self.session.get_player_jersey_number(pid)
+            if pid in self.session.players_lookup:
+                p = self.session.players_lookup[pid]
+                pos_str = get_position_name(p["pos_code"])
+                roster_items.append(f"#{jersey:02d} | [{p['overall']}] {p['name']} ({pos_str}) - ID {pid}")
+            else:
+                roster_items.append(f"#{jersey:02d} | Player ID #{pid}")
+        if dpg.does_item_exist("team_roster_listbox"):
+            dpg.configure_item("team_roster_listbox", items=roster_items)
+
     def _on_select_team(self, sender, app_data):
         items = dpg.get_item_configuration("teams_listbox")["items"]
         if not items or app_data not in items:
@@ -1177,62 +1278,244 @@ class SquadEditorApp:
         dpg.set_value("edit_team_name", t["name"])
         dpg.set_value("edit_team_stadium", t.get("stadium", "Default Stadium"))
 
-        # Display roster
-        roster_items = []
-        for pid in t.get("roster", []):
-            if pid in self.session.players_lookup:
-                p = self.session.players_lookup[pid]
-                pos_str = get_position_name(p["pos_code"])
-                roster_items.append(f"[{p['overall']}] {p['name']} ({pos_str}) - ID {pid}")
-            else:
-                roster_items.append(f"Player ID #{pid}")
-
-        dpg.configure_item("team_roster_listbox", items=roster_items)
+        self._refresh_team_roster_display()
+        self.selected_team_roster_pid = None
+        if dpg.does_item_exist("team_roster_player_actions"):
+            dpg.configure_item("team_roster_player_actions", show=False)
         dpg.configure_item("team_edit_controls", show=True)
         dpg.set_value("team_save_feedback", "")
+
+    def _on_select_team_roster_player(self, sender, app_data):
+        if not app_data or "ID " not in app_data:
+            return
+        try:
+            pid = int(app_data.split("ID ")[-1].strip())
+        except Exception:
+            return
+        self.selected_team_roster_pid = pid
+        p = self.session.players_lookup.get(pid)
+        pname = p["name"] if p else f"Player #{pid}"
+        ovr = p.get("overall", "--") if p else "--"
+        pos = get_position_name(p.get("pos_code", -1)) if p else "N/A"
+        jersey = self.session.get_player_jersey_number(pid)
+        
+        dpg.set_value("team_roster_player_title", f"Managing: #{jersey} {pname} ({pos} | {ovr} OVR | PID: {pid})")
+        dpg.set_value("edit_team_roster_jersey_num", jersey)
+        dpg.configure_item("team_roster_player_actions", show=True)
+
+    def _on_set_roster_jersey_num(self):
+        if not self.selected_team_roster_pid or not self.selected_team:
+            return
+        pid = self.selected_team_roster_pid
+        num = dpg.get_value("edit_team_roster_jersey_num")
+        if not (1 <= num <= 99):
+            dpg.set_value("team_save_feedback", "⚠️ Jersey number must be between 1 and 99.")
+            return
+            
+        duplicate_name = None
+        for other_pid in self.selected_team.get("roster", []):
+            if other_pid != pid:
+                if self.session.get_player_jersey_number(other_pid) == num:
+                    other_p = self.session.players_lookup.get(other_pid)
+                    duplicate_name = other_p["name"] if other_p else f"Player #{other_pid}"
+                    break
+                    
+        self.session.set_player_jersey_number(pid, num)
+        p = self.session.players_lookup.get(pid)
+        pname = p["name"] if p else f"Player #{pid}"
+        
+        self._refresh_team_roster_display()
+        if duplicate_name:
+            dpg.set_value("team_save_feedback", f"✓ Set #{num} for {pname} (Note: #{num} was also worn by {duplicate_name})")
+        else:
+            dpg.set_value("team_save_feedback", f"✓ Set jersey #{num} for {pname}!")
+
+    def _on_release_roster_player(self):
+        if not self.selected_team_roster_pid or not self.selected_team:
+            return
+        pid = self.selected_team_roster_pid
+        p = self.session.players_lookup.get(pid)
+        pname = p["name"] if p else f"Player #{pid}"
+        
+        # Transfer to Free Agents (0)
+        self.session.transfer_player(pid, 0)
+        
+        if pid in self.selected_team.get("roster", []):
+            self.selected_team["roster"].remove(pid)
+            self.selected_team["roster_count"] = len(self.selected_team["roster"])
+            
+        self.selected_team_roster_pid = None
+        dpg.configure_item("team_roster_player_actions", show=False)
+        self._refresh_team_roster_display()
+        self._on_filter_teams()
+        self._on_filter_players()
+        dpg.set_value("team_save_feedback", f"❌ Released {pname} to Free Agents!")
+
+    def _on_open_sign_player_modal(self):
+        if not self.selected_team:
+            return
+        tname = self.selected_team["name"]
+        tid = self.selected_team["teamid"]
+        dpg.set_value("sign_player_target_club_label", f"Target Destination: {tname} (ID: {tid})")
+        dpg.set_value("sign_player_search_input", "")
+        dpg.set_value("sign_player_pos_combo", "All")
+        dpg.set_value("sign_player_min_ovr_slider", 0)
+        dpg.set_value("sign_player_selected_info", "None selected")
+        self.selected_sign_player = None
+        self._on_filter_sign_players()
+        dpg.configure_item("sign_player_modal", show=True)
+
+    def _on_filter_sign_players(self):
+        search_txt = (dpg.get_value("sign_player_search_input") or "").lower().strip()
+        pos_cat = dpg.get_value("sign_player_pos_combo") or "All"
+        min_ovr = dpg.get_value("sign_player_min_ovr_slider") or 0
+        
+        current_roster = set(self.selected_team.get("roster", [])) if self.selected_team else set()
+        
+        filtered = []
+        for p in self.session.players_cache:
+            pid = p["playerid"]
+            if pid in current_roster:
+                continue
+            if p["overall"] < min_ovr:
+                continue
+            if pos_cat != "All":
+                pos_code = p["pos_code"]
+                if pos_cat == "Attackers" and pos_code not in [20, 21, 22, 23, 24, 25, 26, 27]:
+                    continue
+                elif pos_cat == "Midfielders" and pos_code not in [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]:
+                    continue
+                elif pos_cat == "Defenders" and pos_code not in [1, 2, 3, 4, 5, 6, 7, 8]:
+                    continue
+                elif pos_cat == "Goalkeepers" and pos_code != 0:
+                    continue
+            if search_txt:
+                name_match = search_txt in p["name"].lower()
+                club_match = search_txt in p["club"].lower()
+                id_match = search_txt in str(pid)
+                if not (name_match or club_match or id_match):
+                    continue
+            filtered.append(p)
+            if len(filtered) >= 250:
+                break
+                
+        self.filtered_sign_players = filtered
+        items = [f"[{p['overall']}] {p['name']} ({get_position_name(p['pos_code'])}) — {p['club']} (Age {p['age']}) - ID {p['playerid']}" for p in self.filtered_sign_players]
+        dpg.configure_item("sign_player_listbox", items=items)
+        dpg.set_value("sign_player_count_label", f"Matching Players: {len(self.filtered_sign_players):,} (showing top 250)")
+
+    def _on_select_sign_player(self, sender, app_data):
+        items = dpg.get_item_configuration("sign_player_listbox")["items"]
+        if not items or app_data not in items:
+            return
+        idx = items.index(app_data)
+        if idx >= len(self.filtered_sign_players):
+            return
+        p = self.filtered_sign_players[idx]
+        self.selected_sign_player = p
+        pos_str = get_position_name(p["pos_code"])
+        dpg.set_value("sign_player_selected_info", f"[{p['overall']}] {p['name']} ({pos_str}) — Current: {p['club']} | Age: {p['age']} | ID: {p['playerid']}")
+
+    def _on_confirm_sign_player(self):
+        if not self.selected_sign_player or not self.selected_team:
+            return
+        p = self.selected_sign_player
+        pid = p["playerid"]
+        tid = self.selected_team["teamid"]
+        tname = self.selected_team["name"]
+        
+        # Execute transfer in database
+        self.session.transfer_player(pid, tid)
+        
+        # Add to current team roster
+        if "roster" not in self.selected_team:
+            self.selected_team["roster"] = []
+        if pid not in self.selected_team["roster"]:
+            self.selected_team["roster"].append(pid)
+        self.selected_team["roster_count"] = len(self.selected_team["roster"])
+        
+        dpg.configure_item("sign_player_modal", show=False)
+        self._refresh_team_roster_display()
+        self._on_filter_teams()
+        self._on_filter_players()
+        dpg.set_value("team_save_feedback", f"✅ Successfully signed {p['name']} to {tname}!")
 
     def _on_save_team_changes(self):
         if not self.selected_team:
             return
         new_name = dpg.get_value("edit_team_name")
+        new_stadium = dpg.get_value("edit_team_stadium")
         self.selected_team["name"] = new_name
-        dpg.set_value("team_save_feedback", "✓ Club details updated!")
+        self.selected_team["stadium"] = new_stadium
+        self.session.update_team_stadium(self.selected_team["teamid"], new_stadium)
+        dpg.set_value("team_save_feedback", "✓ Club details & stadium updated!")
         self._on_filter_teams()
 
     # --- Database Editor UI Callbacks ---
 
     def _load_database_tables_dropdown(self):
-        items = []
+        entries = []
         for sname, tbl in self.session.db.tables_map.items():
             disp = get_table_display_name(sname)
-            items.append(f"{sname} — {disp} ({len(tbl.records):,} rows)")
-        self.all_table_items = items
+            safety = get_table_safety_info(sname)
+            cat = get_table_category(sname)
+            label = f"{safety['badge']} {sname} — {disp} ({len(tbl.records):,} rows)"
+            entries.append((sname, cat, label))
+        self.all_table_entries = entries
+        self._refresh_tables_dropdown()
+
+    def _refresh_tables_dropdown(self):
+        if not hasattr(self, "all_table_entries"):
+            return
+        cat_filter = self.selected_category
+        clean_cat = cat_filter.split("(")[0].strip()
+        search_txt = (dpg.get_value("db_table_filter_input") or "").lower().strip() if dpg.does_item_exist("db_table_filter_input") else ""
+
+        filtered_items = []
+        for sname, cat, label in self.all_table_entries:
+            if "All Categories" not in clean_cat and clean_cat not in cat:
+                continue
+            if search_txt and search_txt not in label.lower() and search_txt not in sname.lower():
+                continue
+            filtered_items.append(label)
+
         if dpg.does_item_exist("db_table_selector"):
-            dpg.configure_item("db_table_selector", items=items)
-            if items:
-                dpg.set_value("db_table_selector", items[0])
-                self.selected_table_sname = self.session.db.tables[0].sname
-                self._load_db_table(self.selected_table_sname)
+            dpg.configure_item("db_table_selector", items=filtered_items)
+            if filtered_items:
+                current_val = dpg.get_value("db_table_selector")
+                if current_val in filtered_items:
+                    target_label = current_val
+                else:
+                    target_label = filtered_items[0]
+                    dpg.set_value("db_table_selector", target_label)
+                sname = self._parse_sname_from_label(target_label)
+                if sname != self.selected_table_sname or not hasattr(self, "_last_loaded_db_table") or self._last_loaded_db_table != sname:
+                    self.selected_table_sname = sname
+                    self._last_loaded_db_table = sname
+                    self.current_table_page = 0
+                    self._load_db_table(sname)
+            else:
+                dpg.set_value("db_table_selector", "")
+
+    def _parse_sname_from_label(self, label: str) -> str:
+        tokens = label.split(" ")
+        for tok in tokens:
+            cleaned = tok.strip()
+            if len(cleaned) == 4 and cleaned.isalnum():
+                return cleaned
+        return label.split(" ")[0]
+
+    def _on_change_db_category(self, sender, app_data):
+        self.selected_category = app_data
+        self._refresh_tables_dropdown()
 
     def _on_filter_db_tables(self, sender, app_data):
-        filter_txt = (dpg.get_value("db_table_filter_input") or "").lower().strip()
-        if not hasattr(self, "all_table_items"):
-            return
-        if not filter_txt:
-            filtered = self.all_table_items
-        else:
-            filtered = [it for it in self.all_table_items if filter_txt in it.lower()]
-        dpg.configure_item("db_table_selector", items=filtered)
-        if filtered:
-            dpg.set_value("db_table_selector", filtered[0])
-            sname = filtered[0].split(" ")[0].split("—")[0].strip()
-            self.selected_table_sname = sname
-            self.current_table_page = 0
-            self._load_db_table(sname)
+        self._refresh_tables_dropdown()
 
     def _on_change_db_table(self, sender, app_data):
-        sname = app_data.split(" ")[0].split("—")[0].strip()
+        sname = self._parse_sname_from_label(app_data)
         self.selected_table_sname = sname
+        self._last_loaded_db_table = sname
         self.current_table_page = 0
         self._load_db_table(sname)
 
@@ -1240,33 +1523,80 @@ class SquadEditorApp:
         tbl = self.session.get_table(sname)
         if not tbl:
             return
-        dpg.set_value("db_table_stats_text", f"Rows: {len(tbl.records):,} | Columns: {len(tbl.columns)} | Record Size: {tbl.rec_size} bytes")
+        safety = get_table_safety_info(sname)
+        cat = get_table_category(sname)
+
+        if dpg.does_item_exist("db_table_safety_badge"):
+            dpg.set_value("db_table_safety_badge", safety["badge"])
+            if safety["level"] == "SAFE":
+                dpg.configure_item("db_table_safety_badge", color=(0, 255, 120))
+            elif safety["level"] == "DANGEROUS":
+                dpg.configure_item("db_table_safety_badge", color=(255, 70, 70))
+            else:
+                dpg.configure_item("db_table_safety_badge", color=(255, 200, 0))
+
+        if dpg.does_item_exist("db_table_safety_desc"):
+            dpg.set_value("db_table_safety_desc", safety["desc"])
+
+        if dpg.does_item_exist("db_table_stats_text"):
+            dpg.set_value("db_table_stats_text", f"Rows: {len(tbl.records):,} | Columns: {len(tbl.columns)} | Record Size: {tbl.rec_size} bytes | Category: {cat}")
+
         self._render_db_records_page()
 
-    def _on_add_row(self):
+    def _on_click_add_row(self):
         tbl = self.session.get_table(self.selected_table_sname)
-        if tbl:
-            self.session.add_table_row(self.selected_table_sname)
-            self._load_db_table(self.selected_table_sname)
-            dpg.set_value("record_save_feedback", "✓ New blank row added at end of table!")
+        if not tbl:
+            return
+        safety = get_table_safety_info(self.selected_table_sname)
+        self.pending_structural_action = "add"
+        msg = (
+            f"You are about to ADD a new row to table '{self.selected_table_sname} — {get_table_display_name(self.selected_table_sname)}'.\n\n"
+            f"Safety Level: {safety['badge']}\n"
+            f"Note: In EA SPORTS FC 25, relational tables have fixed memory allocations referenced by the game engine. "
+            f"Adding rows in core tables may alter indexing or cause game crashes.\n\n"
+            f"Confirm only if you intend to add a record."
+        )
+        dpg.set_value("structural_modal_msg", msg)
+        dpg.configure_item("structural_confirm_modal", show=True)
 
     def _on_clone_row(self):
         tbl = self.session.get_table(self.selected_table_sname)
         if tbl and self.selected_record_index is not None:
             self.session.clone_table_row(self.selected_table_sname, self.selected_record_index)
             self._load_db_table(self.selected_table_sname)
-            dpg.set_value("record_save_feedback", f"✓ Cloned row #{self.selected_record_index}!")
+            dpg.set_value("record_save_feedback", f"✓ Cloned row #{self.selected_record_index} to end of table!")
 
-    def _on_delete_row(self):
+    def _on_click_delete_row(self):
         tbl = self.session.get_table(self.selected_table_sname)
-        if tbl and self.selected_record_index is not None and len(tbl.records) > 0:
+        if not tbl or self.selected_record_index is None:
+            return
+        safety = get_table_safety_info(self.selected_table_sname)
+        self.pending_structural_action = "delete"
+        msg = (
+            f"You are about to DELETE row #{self.selected_record_index} from table '{self.selected_table_sname} — {get_table_display_name(self.selected_table_sname)}'.\n\n"
+            f"Safety Level: {safety['badge']}\n"
+            f"WARNING: This operation shifts row indices. Deleting crucial rows for players, teams, or competitions may corrupt save files or crash the game!\n\n"
+            f"Confirm only if you know what you are doing."
+        )
+        dpg.set_value("structural_modal_msg", msg)
+        dpg.configure_item("structural_confirm_modal", show=True)
+
+    def _on_confirm_structural_action(self):
+        dpg.configure_item("structural_confirm_modal", show=False)
+        action = self.pending_structural_action
+        self.pending_structural_action = None
+        if action == "add":
+            self.session.add_table_row(self.selected_table_sname)
+            self._load_db_table(self.selected_table_sname)
+            dpg.set_value("record_save_feedback", "✓ New blank row added at end of table!")
+        elif action == "delete" and self.selected_record_index is not None:
             deleted_idx = self.selected_record_index
             self.session.delete_table_row(self.selected_table_sname, deleted_idx)
             self.selected_record_index = None
             self._load_db_table(self.selected_table_sname)
             dpg.delete_item("record_fields_container", children_only=True)
             dpg.configure_item("record_actions_group", show=False)
-            dpg.set_value("db_table_stats_text", f"Rows: {len(tbl.records):,} | Columns: {len(tbl.columns)} | Record Size: {tbl.rec_size} bytes")
+            dpg.set_value("record_save_feedback", f"✓ Deleted row #{deleted_idx}!")
 
     def _render_db_records_page(self):
         tbl = self.session.get_table(self.selected_table_sname)
@@ -1286,13 +1616,7 @@ class SquadEditorApp:
         items = []
         filter_txt = (dpg.get_value("db_record_search_input") or "").lower().strip() if dpg.does_item_exist("db_record_search_input") else ""
         for r_idx in range(start_idx, end_idx):
-            rec = tbl.records[r_idx]
-            summary_cols = []
-            for col in tbl.columns[:4]:
-                val = col.decode_value(rec)
-                col_name = get_column_display_name(col.sname)
-                summary_cols.append(f"{col_name}: {val}")
-            row_str = f"Row {r_idx:5d}: " + " | ".join(summary_cols)
+            row_str = self.session.format_table_row_summary(self.selected_table_sname, r_idx)
             if filter_txt and filter_txt not in row_str.lower():
                 continue
             items.append(row_str)
@@ -1322,12 +1646,26 @@ class SquadEditorApp:
             return
 
         try:
-            row_idx = int(app_data.split(":")[0].replace("Row", "").strip())
+            row_idx = int(app_data.split("|")[0].replace("Row", "").strip())
         except Exception:
             return
 
         self.selected_record_index = row_idx
-        dpg.set_value("record_inspector_header", f"Editing Table '{tbl.sname}' Row #{row_idx}")
+        entity_hdr = self.session.get_row_entity_header(tbl.sname, row_idx)
+        if entity_hdr:
+            dpg.set_value("record_inspector_entity_banner", entity_hdr)
+        else:
+            dpg.set_value("record_inspector_entity_banner", "")
+
+        safety = get_table_safety_info(tbl.sname)
+        dpg.set_value("record_inspector_header", f"Editing Table '{tbl.sname}' ({get_table_display_name(tbl.sname)}) Row #{row_idx}")
+        
+        if safety["level"] == "DANGEROUS":
+            dpg.set_value("record_inspector_safety_warning", f"⚠️ HIGH RISK TABLE: {safety['desc']}")
+        elif safety["level"] == "CAUTION":
+            dpg.set_value("record_inspector_safety_warning", f"🟡 CAUTION: {safety['desc']}")
+        else:
+            dpg.set_value("record_inspector_safety_warning", "")
 
         rec = tbl.records[row_idx]
         dpg.delete_item("record_fields_container", children_only=True)
@@ -1336,15 +1674,33 @@ class SquadEditorApp:
             for col in tbl.columns:
                 val = col.decode_value(rec)
                 disp_name = get_column_display_name(col.sname)
-                with dpg.group(horizontal=True):
-                    dpg.add_text(f"{disp_name} [{col.sname}] ({col.bit_size}b):", color=(180, 220, 255), width=260)
-                    tag = f"field_edit_{col.sname}"
-                    if col.col_type == 0: # String
-                        dpg.add_input_text(default_value=str(val), tag=tag, width=300)
-                    elif col.col_type == 4: # Float
-                        dpg.add_input_float(default_value=float(val), tag=tag, width=200)
-                    else: # Int / Bitfield
-                        dpg.add_input_int(default_value=int(val), tag=tag, width=200)
+                warn = get_column_safety_warning(tbl.sname, col.sname, col.col_type, col.bit_size)
+                
+                with dpg.group():
+                    with dpg.group(horizontal=True):
+                        # Label with bit width and max range
+                        if col.col_type == 3:
+                            max_val = (1 << col.bit_size) - 1
+                            lbl = f"{disp_name} [{col.sname}] ({col.bit_size}b | 0-{max_val:,}):"
+                        else:
+                            lbl = f"{disp_name} [{col.sname}]:"
+                            
+                        dpg.add_text(lbl, color=(180, 220, 255), width=280)
+                        tag = f"field_edit_{col.sname}"
+                        
+                        if col.col_type == 0:  # String
+                            dpg.add_input_text(default_value=str(val), tag=tag, width=300)
+                        elif col.col_type == 4:  # Float
+                            dpg.add_input_float(default_value=float(val), tag=tag, width=200)
+                        elif col.bit_size == 1:  # Boolean
+                            dpg.add_combo(items=["0 - Disabled", "1 - Enabled"], default_value="1 - Enabled" if val else "0 - Disabled", tag=tag, width=200)
+                        else:  # Integer / Bitfield
+                            dpg.add_input_int(default_value=int(val), tag=tag, width=200)
+                    
+                    # If this column has a safety warning, show it directly underneath
+                    if warn:
+                        dpg.add_text(f"   {warn}", color=(255, 180, 50))
+                    dpg.add_spacer(height=3)
 
         dpg.configure_item("record_actions_group", show=True)
         dpg.set_value("record_save_feedback", "")
@@ -1355,13 +1711,31 @@ class SquadEditorApp:
             return
 
         row_idx = self.selected_record_index
+        # 1. Validation pass: Check every column value for valid types and bit overflow
+        parsed_values = {}
         for col in tbl.columns:
             tag = f"field_edit_{col.sname}"
             if dpg.does_item_exist(tag):
-                val = dpg.get_value(tag)
-                self.session.update_table_cell(self.selected_table_sname, row_idx, col.sname, val)
+                raw_val = dpg.get_value(tag)
+                if col.bit_size == 1 and isinstance(raw_val, str):
+                    val = 1 if "1" in raw_val else 0
+                else:
+                    val = raw_val
+                    
+                is_valid, err_msg = validate_column_value(col.col_type, col.bit_size, val)
+                if not is_valid:
+                    disp_name = get_column_display_name(col.sname)
+                    dpg.set_value("record_save_feedback", f"❌ ERROR in '{disp_name}' [{col.sname}]: {err_msg}")
+                    dpg.configure_item("record_save_feedback", color=(255, 80, 80))
+                    return
+                parsed_values[col.sname] = val
 
-        dpg.set_value("record_save_feedback", "✓ Record updated and serialized successfully!")
+        # 2. Apply verified changes
+        for sname, val in parsed_values.items():
+            self.session.update_table_cell(self.selected_table_sname, row_idx, sname, val)
+
+        dpg.configure_item("record_save_feedback", color=(0, 255, 120))
+        dpg.set_value("record_save_feedback", f"✓ Record #{row_idx} saved and verified successfully!")
         self._render_db_records_page()
 
 def main():

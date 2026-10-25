@@ -41,6 +41,11 @@ class SquadsSession:
         self.teams_cache: List[Dict[str, Any]] = []
         self.team_rosters: Dict[int, List[int]] = {}
         self.user_transfers: Dict[int, int] = {}
+        self.base_players_list: List[int] = []
+        self.base_players_records: List[Dict[str, Any]] = []
+        self.team_squad_roles: Dict[int, Dict[str, int]] = {}
+        self.player_jerseys: Dict[int, int] = {}
+        self.user_jerseys: Dict[int, int] = {}
 
         # Pre-load player presets from Live Editor database
         self._load_player_presets()
@@ -110,6 +115,8 @@ class SquadsSession:
                         try:
                             pid = int(r.get("playerid", 0))
                             if pid <= 0: continue
+                            self.base_players_list.append(pid)
+                            self.base_players_records.append(r)
                             if pid in self.players_lookup:
                                 p = self.players_lookup[pid]
                                 p["potential"] = int(r.get("potential", p["overall"]))
@@ -176,6 +183,26 @@ class SquadsSession:
                         p["nation_name"] = cdata.get("nation", "")
                         p["alt_positions"] = cdata.get("alt_pos", "")
                         p["playstyles_str"] = cdata.get("playstyles", "")
+            except Exception:
+                pass
+
+        # 4. Ingest player_jerseys.json (authentic kit numbers for 17,737+ real players)
+        jerseys_path = None
+        for jd in clubs_dirs:
+            if jd and os.path.exists(os.path.join(jd, "player_jerseys.json")):
+                jerseys_path = os.path.join(jd, "player_jerseys.json")
+                break
+        if jerseys_path and os.path.exists(jerseys_path):
+            try:
+                import json
+                with open(jerseys_path, "r", encoding="utf-8") as f:
+                    j_map = json.load(f)
+                for pid_str, num in j_map.items():
+                    pid = int(pid_str)
+                    num_int = int(num)
+                    self.player_jerseys[pid] = num_int
+                    if pid in self.players_lookup:
+                        self.players_lookup[pid].setdefault("stats", {})["jerseynumber"] = str(num_int)
             except Exception:
                 pass
 
@@ -265,6 +292,20 @@ class SquadsSession:
                 except Exception:
                     pass
 
+        risb_player_rows: Dict[int, int] = {}
+        if risb:
+            for r_idx, rec in enumerate(risb.records):
+                try:
+                    pid = get_bits(rec, 18, 18)
+                    if pid > 0:
+                        risb_player_rows[pid] = r_idx
+                        custom_jersey = get_bits(rec, 36, 7)
+                        if 1 <= custom_jersey <= 99:
+                            self.player_jerseys[pid] = custom_jersey
+                            self.user_jerseys[pid] = custom_jersey
+                except Exception:
+                    pass
+
         # 3. Build Players Cache
         # Ingest from self.players_lookup (all 25,369 players with real official clubs)
         for pid, pdata in self.players_lookup.items():
@@ -281,13 +322,13 @@ class SquadsSession:
                     self.team_rosters[tid] = []
                 self.team_rosters[tid].append(pid)
 
-            risb_row = None
+            risb_row = risb_player_rows.get(pid)
             czum_row = czum_player_rows.get(pid)
             ovr = pdata["overall"]
             pot = pdata["potential"]
             pos_code = pdata["pos_code"]
 
-            # If present in active squads CZUM, read live database values
+            # If present in active squads CZUM and RrqT, read live database values
             if czum and czum_row is not None and czum_row < len(czum.records):
                 rec = czum.records[czum_row]
                 db_ovr = get_bits(rec, 877, 7)
@@ -300,10 +341,19 @@ class SquadsSession:
                 if db_pos >= 0:
                     pos_code = db_pos
 
+                rrqt = self.db.tables_map.get("RrqT")
+                if rrqt and czum_row < len(rrqt.records):
+                    db_jersey = get_bits(rrqt.records[czum_row], 23, 7)
+                    if 1 <= db_jersey <= 99:
+                        self.player_jerseys[pid] = db_jersey
+                        pdata.setdefault("stats", {})["jerseynumber"] = str(db_jersey)
+
             club_name = get_team_name(tid) if tid > 0 else (pdata.get("club") or "Free Agent")
             pos_name = get_position_name(pos_code)
             
             stats = pdata.get("stats", {})
+            if "jerseynumber" not in stats or not stats["jerseynumber"]:
+                stats["jerseynumber"] = str(self.get_player_jersey_number(pid))
             b_day = 1
             b_mon = 1
             bdate_str = str(stats.get("birthdate", ""))
@@ -429,6 +479,11 @@ class SquadsSession:
                 elif attr_key == "teamid":
                     p["teamid"] = int(new_val)
                     p["club"] = get_team_name(int(new_val))
+                elif attr_key == "jerseynumber":
+                    try:
+                        self.set_player_jersey_number(player_id, int(new_val))
+                    except Exception:
+                        pass
 
                 # Write directly to active CZUM database record if present:
                 czum_row = p.get("czum_row_idx")
@@ -508,12 +563,14 @@ class SquadsSession:
                     if player_id not in self.team_rosters[new_team_id]:
                         self.team_rosters[new_team_id].append(player_id)
                         
-                # Update team cache counts
+                # Update team cache counts and rosters
                 for t in self.teams_cache:
                     if t["teamid"] == old_team:
-                        t["roster_count"] = len(self.team_rosters.get(old_team, []))
+                        t["roster"] = list(self.team_rosters.get(old_team, []))
+                        t["roster_count"] = len(t["roster"])
                     elif t["teamid"] == new_team_id:
-                        t["roster_count"] = len(self.team_rosters.get(new_team_id, []))
+                        t["roster"] = list(self.team_rosters.get(new_team_id, []))
+                        t["roster_count"] = len(t["roster"])
                         
                 # Physically persist into rIsB transfer table
                 risb = self.db.tables_map.get("rIsB")
@@ -539,6 +596,149 @@ class SquadsSession:
                             risb.records.append(new_rec)
                             risb.written_records = len(risb.records)
                             p["risb_row_idx"] = len(risb.records) - 1
+                return True
+        return False
+
+    def get_team_squad_roles(self, team_id: int) -> Dict[str, int]:
+        """Returns active squad roles (captain, penalty, free kicks, corners) for a club."""
+        if team_id in self.team_squad_roles:
+            return self.team_squad_roles[team_id]
+            
+        roster = self.team_rosters.get(team_id, [])
+        if not roster:
+            return {}
+            
+        # Default roles based on player overall ratings
+        sorted_pids = sorted(roster, key=lambda pid: self.players_lookup.get(pid, {}).get("overall", 60), reverse=True)
+        roles = {
+            "captain": sorted_pids[0],
+            "penalty": sorted_pids[0],
+            "freekick_short": sorted_pids[1] if len(sorted_pids) > 1 else sorted_pids[0],
+            "freekick_long": sorted_pids[2] if len(sorted_pids) > 2 else sorted_pids[0],
+            "corner_left": sorted_pids[1] if len(sorted_pids) > 1 else sorted_pids[0],
+            "corner_right": sorted_pids[2] if len(sorted_pids) > 2 else sorted_pids[0],
+        }
+        self.team_squad_roles[team_id] = roles
+        return roles
+
+    def set_team_squad_roles(self, team_id: int, roles: Dict[str, int]) -> bool:
+        """Saves squad roles for a club."""
+        self.team_squad_roles[team_id] = roles
+        return True
+
+    def get_player_jersey_number(self, player_id: int) -> int:
+        """Returns authentic squad jersey number (1-99) for a player."""
+        # 1. User manual runtime edit
+        if player_id in self.user_jerseys:
+            return self.user_jerseys[player_id]
+
+        # 2. In-memory stats
+        if player_id in self.players_lookup:
+            stats = self.players_lookup[player_id].get("stats", {})
+            try:
+                num = int(stats.get("jerseynumber", 0))
+                if 1 <= num <= 99:
+                    return num
+            except Exception:
+                pass
+
+        # 3. Verified preset jersey map
+        if player_id in self.player_jerseys:
+            return self.player_jerseys[player_id]
+
+        # 4. Position-based smart fallback (never pseudo-random modulo)
+        pos_code = -1
+        if player_id in self.players_lookup:
+            pos_code = self.players_lookup[player_id].get("pos_code", -1)
+        if pos_code == 0:  # GK
+            return 1
+        elif pos_code in (2, 3):  # RB / RWB
+            return 2
+        elif pos_code in (7, 8):  # LB / LWB
+            return 3
+        elif pos_code in (4, 5, 6):  # CB
+            return 4
+        elif pos_code in (9, 10, 11):  # CDM
+            return 6
+        elif pos_code in (12, 23):  # RM / RW
+            return 7
+        elif pos_code in (13, 14, 15):  # CM
+            return 8
+        elif pos_code in (20, 21, 24, 25, 26):  # ST / CF
+            return 9
+        elif pos_code in (17, 18, 19):  # CAM
+            return 10
+        elif pos_code in (16, 27):  # LM / LW
+            return 11
+        return 10
+
+    def set_player_jersey_number(self, player_id: int, number: int) -> bool:
+        """Sets squad jersey number (1-99) for a player and persists directly into rIsB and RrqT."""
+        if not (1 <= number <= 99):
+            return False
+        self.user_jerseys[player_id] = number
+        self.player_jerseys[player_id] = number
+        if player_id in self.players_lookup:
+            self.players_lookup[player_id].setdefault("stats", {})["jerseynumber"] = str(number)
+        for p in self.players_cache:
+            if p["playerid"] == player_id:
+                p.setdefault("stats", {})["jerseynumber"] = str(number)
+                
+                # Persist to rIsB (active save delta)
+                risb = self.db.tables_map.get("rIsB")
+                if risb:
+                    r_idx = p.get("risb_row_idx")
+                    if r_idx is not None and r_idx < len(risb.records):
+                        set_bits(risb.records[r_idx], 36, 7, number)
+                    else:
+                        target_row = None
+                        for idx, rec in enumerate(risb.records):
+                            if get_bits(rec, 18, 18) == player_id:
+                                target_row = idx
+                                break
+                        if target_row is not None:
+                            set_bits(risb.records[target_row], 36, 7, number)
+                            p["risb_row_idx"] = target_row
+                        else:
+                            for idx, rec in enumerate(risb.records):
+                                if get_bits(rec, 18, 18) == 0:
+                                    target_row = idx
+                                    break
+                            if target_row is not None:
+                                set_bits(risb.records[target_row], 18, 18, player_id)
+                                set_bits(risb.records[target_row], 0, 18, p.get("teamid", 0))
+                                set_bits(risb.records[target_row], 36, 7, number)
+                                p["risb_row_idx"] = target_row
+                            else:
+                                new_rec = bytearray(risb.rec_size)
+                                set_bits(new_rec, 18, 18, player_id)
+                                set_bits(new_rec, 0, 18, p.get("teamid", 0))
+                                set_bits(new_rec, 36, 7, number)
+                                risb.records.append(new_rec)
+                                risb.written_records = len(risb.records)
+                                p["risb_row_idx"] = len(risb.records) - 1
+
+                # Also update RrqT if czum_row exists
+                r_idx = p.get("czum_row_idx")
+                rrqt = self.db.tables_map.get("RrqT")
+                if rrqt and r_idx is not None and r_idx < len(rrqt.records):
+                    set_bits(rrqt.records[r_idx], 23, 7, number)
+                break
+        return True
+
+    def update_team_stadium(self, team_id: int, new_stadium_name: str) -> bool:
+        """Updates home stadium name for a club in memory and in table kISL."""
+        clean_name = new_stadium_name.strip()
+        if not clean_name:
+            return False
+        for t in self.teams_cache:
+            if t["teamid"] == team_id:
+                t["stadium"] = clean_name
+                r_idx = t.get("row_index")
+                if r_idx is not None:
+                    kisl = self.db.tables_map.get("kISL")
+                    if kisl and r_idx < len(kisl.records):
+                        self.update_table_cell("kISL", r_idx, "fwCQ", clean_name)
                 return True
         return False
 
@@ -597,3 +797,137 @@ class SquadsSession:
 
     def get_table(self, sname: str) -> Optional[DBTable]:
         return self.db.tables_map.get(sname)
+
+    def format_table_row_summary(self, table_sname: str, row_idx: int) -> str:
+        """Generates an informative, human-readable summary for a specific table row."""
+        tbl = self.get_table(table_sname)
+        if not tbl or row_idx >= len(tbl.records):
+            return f"Row {row_idx:5d}"
+            
+        rec = tbl.records[row_idx]
+
+        # 1. Player Attributes & Stats (CZUM)
+        if table_sname == "CZUM":
+            if row_idx < len(self.base_players_list):
+                pid = self.base_players_list[row_idx]
+                p = self.players_lookup.get(pid)
+                b = self.base_players_records[row_idx] if row_idx < len(self.base_players_records) else {}
+                pname = p.get("name") if p else f"Player #{pid}"
+                club = p.get("club") if p else "Free Agent"
+                ovr = b.get("overallrating") or (p.get("overall") if p else 60)
+                pot = b.get("potential") or (p.get("potential") if p else ovr)
+                pos = get_position_name(p.get("pos_code", -1)) if p else "N/A"
+                return f"Row {row_idx:5d} | [{ovr} OVR / {pot} POT] {pname} ({pos}) — {club} (PID: {pid})"
+
+        # 2. Team Formations & Rosters (lyxL)
+        elif table_sname == "lyxL":
+            col_tname = tbl.columns_map.get("IOSv")
+            tid = int.from_bytes(rec[:2], "little")
+            tname = col_tname.decode_value(rec) if col_tname else get_team_name(tid)
+            kisl = self.db.tables_map.get("kISL")
+            stadium = "Default Stadium"
+            if kisl and row_idx < len(kisl.records):
+                col_s = kisl.columns_map.get("fwCQ")
+                if col_s:
+                    stadium = col_s.decode_value(kisl.records[row_idx]).lstrip("_").strip()
+            roster_len = len(self.team_rosters.get(tid, []))
+            return f"Row {row_idx:5d} | [Club] {tname} (ID: {tid}) — Stadium: {stadium} ({roster_len} players)"
+
+        # 3. Stadium Names & Home Venues (kISL)
+        elif table_sname == "kISL":
+            col = tbl.columns_map.get("fwCQ")
+            sname = col.decode_value(rec).lstrip("_").strip() if col else "Default Stadium"
+            lyxl = self.db.tables_map.get("lyxL")
+            tname = f"Venue #{row_idx}"
+            if lyxl and row_idx < len(lyxl.records):
+                col_t = lyxl.columns_map.get("IOSv")
+                if col_t:
+                    tname = col_t.decode_value(lyxl.records[row_idx])
+            return f"Row {row_idx:5d} | [Stadium] {sname} — Home Venue of: {tname} (ID: #{row_idx})"
+
+        # 4. Teams & Club Profiles (mDGw)
+        elif table_sname == "mDGw":
+            tid = int.from_bytes(rec[:2], "little")
+            tname = get_team_name(tid)
+            form_col = tbl.columns_map.get("MZIF")
+            form_name = form_col.decode_value(rec) if form_col else ""
+            if form_name:
+                return f"Row {row_idx:5d} | [Club Profile] {tname} (ID: {tid}) — Formation: {form_name}"
+            return f"Row {row_idx:5d} | [Club Profile] {tname} (ID: {tid})"
+
+        # 5. Player Biometrics (ONtg)
+        elif table_sname == "ONtg":
+            col_name = tbl.columns_map.get("KAOA")
+            pname = col_name.decode_value(rec) if col_name else f"Model #{row_idx}"
+            return f"Row {row_idx:5d} | [Biometrics] {pname} (Row #{row_idx})"
+
+        # 6. Leagues (ijbM)
+        elif table_sname == "ijbM":
+            lid = tbl.columns[0].decode_value(rec) if tbl.columns else row_idx
+            return f"Row {row_idx:5d} | [League] League ID #{lid}"
+
+        # 7. Nations (hCEv)
+        elif table_sname == "hCEv":
+            col = tbl.columns_map.get("mCXg")
+            nid = col.decode_value(rec) if col else row_idx
+            return f"Row {row_idx:5d} | [Nation] Nation ID #{nid}"
+
+        # 8. Head Coaches & Managers (Vmkr)
+        elif table_sname == "Vmkr":
+            col = tbl.columns_map.get("fwCQ")
+            mname = col.decode_value(rec) if col else f"Manager #{row_idx}"
+            return f"Row {row_idx:5d} | [Manager] {mname} (Row #{row_idx})"
+
+        # Generic fallback for all other tables
+        summary_cols = []
+        for col in tbl.columns[:4]:
+            val = col.decode_value(rec)
+            col_name = get_column_display_name(col.sname)
+            # Check if this value maps to a known team ID
+            if "team" in col_name.lower() and isinstance(val, int) and val in TEAM_NAMES:
+                summary_cols.append(f"{col_name}: {TEAM_NAMES[val]} ({val})")
+            else:
+                summary_cols.append(f"{col_name}: {val}")
+        return f"Row {row_idx:5d} | " + " | ".join(summary_cols)
+
+    def get_row_entity_header(self, table_sname: str, row_idx: int) -> Optional[str]:
+        """Returns entity context header for the Record Inspector."""
+        if table_sname == "CZUM" and row_idx < len(self.base_players_list):
+            pid = self.base_players_list[row_idx]
+            p = self.players_lookup.get(pid)
+            if p:
+                pos = get_position_name(p.get("pos_code", -1))
+                return f"👤 Player: {p['name']} ({pos}) — {p['club']} (PID: {pid} | {p['overall']} OVR)"
+        elif table_sname == "lyxL":
+            tbl = self.get_table("lyxL")
+            if tbl and row_idx < len(tbl.records):
+                rec = tbl.records[row_idx]
+                tid = int.from_bytes(rec[:2], "little")
+                col_t = tbl.columns_map.get("IOSv")
+                tname = col_t.decode_value(rec) if col_t else get_team_name(tid)
+                kisl = self.get_table("kISL")
+                stadium = "Default Stadium"
+                if kisl and row_idx < len(kisl.records):
+                    col_s = kisl.columns_map.get("fwCQ")
+                    if col_s:
+                        stadium = col_s.decode_value(kisl.records[row_idx]).lstrip("_").strip()
+                roster_len = len(self.team_rosters.get(tid, []))
+                return f"🛡️ Club: {tname} (ID: {tid}) — Venue: {stadium} ({roster_len} players)"
+        elif table_sname == "kISL":
+            tbl = self.get_table("kISL")
+            if tbl and row_idx < len(tbl.records):
+                col_s = tbl.columns_map.get("fwCQ")
+                sname = col_s.decode_value(tbl.records[row_idx]).lstrip("_").strip() if col_s else "Stadium"
+                lyxl = self.get_table("lyxL")
+                tname = f"Club #{row_idx}"
+                if lyxl and row_idx < len(lyxl.records):
+                    col_t = lyxl.columns_map.get("IOSv")
+                    if col_t:
+                        tname = col_t.decode_value(lyxl.records[row_idx])
+                return f"🏟️ Stadium: {sname} — Home Venue of: {tname}"
+        elif table_sname == "mDGw":
+            tbl = self.get_table("mDGw")
+            if tbl and row_idx < len(tbl.records):
+                tid = int.from_bytes(tbl.records[row_idx][:2], "little")
+                return f"🛡️ Club Profile: {get_team_name(tid)} (ID: {tid})"
+        return None
